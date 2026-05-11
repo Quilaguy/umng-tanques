@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UMNG - Lab 5 Control Discreto Tanques Acoplados [MQTT]</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0d1117;--panel:#161b22;--panel2:#1c2128;--panel3:#21262d;
+    --border:#30363d;--accent:#7c3aed;--accent2:#a855f7;
+    --green:#3fb950;--orange:#f0883e;--cyan:#58a6ff;
+    --red:#f85149;--yellow:#e3b341;--text:#e6edf3;--textdim:#8b949e;
+  }
+  html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-family:'JetBrains Mono',monospace;color:var(--text);font-size:11px}
+  .app{display:grid;grid-template-rows:19% 42% 39%;width:100vw;height:100vh;gap:0}
+
+  /* ── ROW 0 CONFIG ── */
+  .row0{background:var(--panel);border-bottom:1px solid var(--border);padding:4px 6px;display:flex;flex-direction:column;gap:3px}
+  .row0-title{color:var(--textdim);font-size:9px;font-weight:700;letter-spacing:.08em}
+  .row0-groups{display:flex;gap:8px;align-items:flex-start;flex:1}
+  .cfg-group{display:flex;flex-direction:column;gap:3px}
+  .cfg-group-label{color:var(--textdim);font-size:8px;font-weight:700}
+  .cfg-btns{display:flex;gap:4px}
+  .cfg-btn{background:var(--panel3);border:1px solid var(--border);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;padding:4px 10px;cursor:pointer;transition:border-color .15s}
+  .cfg-btn:hover{background:var(--panel2)}
+  .cfg-btn.sel-purple{border:2px solid var(--accent);border-color:var(--accent)}
+  .cfg-btn.sel-cyan{border:2px solid var(--cyan);border-color:var(--cyan)}
+  .cfg-btn.sel-green{border:2px solid var(--green);border-color:var(--green)}
+  .sep{width:1px;background:var(--border);margin:0 4px}
+  .status-bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .status-badge{font-size:9px;font-weight:700;padding:2px 6px;border:1px solid;border-radius:2px}
+  .sb-red{color:var(--red);border-color:var(--red);background:#1a0808}
+  .sb-green{color:var(--green);border-color:var(--green);background:#081a0e}
+  .sb-cyan{color:var(--cyan);border-color:var(--cyan);background:#08121a}
+  .sb-orange{color:var(--orange);border-color:var(--orange);background:#1a1008}
+  .sb-yellow{color:var(--yellow);border-color:var(--yellow);background:#181508}
+  .metrics-row{display:flex;gap:4px;margin-left:auto;align-items:stretch}
+  .metric-card{background:var(--panel2);border:1px solid var(--border);padding:3px 8px;display:flex;flex-direction:column;align-items:center;min-width:68px}
+  .mc-label{color:var(--textdim);font-size:7.5px;font-weight:700}
+  .mc-val{font-size:16px;font-weight:700}
+  .mc-unit{color:var(--textdim);font-size:8px}
+  .mc-accent{border-color:var(--accent)}
+
+  /* ── ROW 1 ── */
+  .row1{display:grid;grid-template-columns:21% 79%;overflow:hidden}
+  .tanks-col{display:grid;grid-template-rows:1fr 1fr;border-right:1px solid var(--border)}
+  .tank-panel{background:var(--panel);border-bottom:1px solid var(--border);position:relative;overflow:hidden;padding:4px}
+  .tank-panel:last-child{border-bottom:none}
+  canvas.tank-canvas{width:100%;height:100%;display:block}
+  .plots-col{display:flex;flex-direction:column;overflow:hidden}
+  .plot-wrap{flex:1;position:relative;border-bottom:1px solid var(--border);padding:2px 4px 2px 2px}
+  .plot-wrap:last-child{border-bottom:none}
+  .plot-title{position:absolute;top:3px;left:6px;color:var(--textdim);font-size:8px;font-weight:700;z-index:2;pointer-events:none}
+  .plot-legend{position:absolute;top:3px;right:6px;display:flex;gap:8px;z-index:2}
+  .leg-item{display:flex;align-items:center;gap:3px;font-size:7.5px;color:var(--textdim)}
+  .leg-dot{width:16px;height:2px;border-radius:1px}
+
+  /* ── ROW 2 ── */
+  .row2{display:grid;grid-template-columns:46% 54%;overflow:hidden}
+  .pid-panel{background:var(--panel);border-right:1px solid var(--border);padding:6px 8px;display:flex;flex-direction:column;gap:4px;overflow:hidden}
+  .con-panel{background:var(--panel);padding:6px 8px;display:flex;flex-direction:column;gap:4px;overflow:hidden}
+  .panel-title{color:var(--textdim);font-size:9px;font-weight:700}
+  .panel-title span{color:var(--cyan);font-weight:700}
+
+  /* SP Slider */
+  .sp-row{display:flex;align-items:center;gap:8px}
+  .sp-row label{color:var(--textdim);font-size:8.5px;white-space:nowrap}
+  .sp-row input[type=range]{flex:1;accent-color:var(--yellow);height:4px}
+  .sp-val{color:var(--yellow);font-weight:700;font-size:13px;min-width:36px;text-align:right}
+
+  /* Buttons */
+  .btns-row{display:flex;gap:4px}
+  .act-btn{flex:1;background:#161b22;border:1.5px solid;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:5px 4px;cursor:pointer;transition:background .12s}
+  .act-btn:hover{background:var(--panel3)}
+  .btn-green{border-color:var(--green);color:var(--green)}
+  .btn-cyan{border-color:var(--cyan);color:var(--cyan)}
+  .btn-red{border-color:var(--red);color:var(--red)}
+  .btn-orange{border-color:var(--orange);color:var(--orange)}
+  .btn-yellow{border-color:var(--yellow);color:var(--yellow)}
+
+  /* MQTT config */
+  .mqtt-fields{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+  .mf{display:flex;flex-direction:column;gap:2px}
+  .mf label{color:var(--textdim);font-size:8px}
+  .mf input{background:var(--panel2);border:1px solid var(--border);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:9px;padding:3px 5px}
+  .mf input:focus{outline:none;border-color:var(--cyan)}
+
+  /* Console */
+  .console-box{background:#0a0f14;border:1px solid var(--cyan);padding:5px 7px;flex:1;overflow-y:auto;min-height:0;font-size:9px;line-height:1.6;color:var(--green)}
+  .cmd-row{display:flex;gap:4px;align-items:stretch}
+  .cmd-input{flex:1;background:var(--panel2);border:1px solid var(--border);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:9px;padding:3px 6px}
+  .cmd-input:focus{outline:none;border-color:var(--cyan)}
+  .cmd-send{background:var(--cyan);border:1.5px solid var(--accent2);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:3px 10px;cursor:pointer}
+  .cmd-send:hover{background:var(--accent2)}
+  .quick-btns{display:grid;grid-template-columns:repeat(4,1fr);gap:3px}
+  .qbtn{background:#161b22;border:1px solid #444c56;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:8.5px;padding:3px 2px;cursor:pointer;text-align:center}
+  .qbtn:hover{background:var(--panel3)}
+  .ise-row{display:flex;gap:4px;align-items:center}
+  .ise-box{flex:1;background:var(--panel2);border:1px solid var(--border);padding:3px 6px;display:flex;align-items:center;gap:6px}
+  .ise-box .ise-label{color:var(--textdim);font-size:8px}
+  .ise-box .ise-val{margin-left:auto;color:var(--accent2);font-size:12px;font-weight:700}
+  .rx-box{background:var(--panel2);border:1px solid var(--border);padding:3px 8px;color:var(--cyan);font-size:9px;font-weight:700;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ═══════════════════════════════════════════════ ROW 0 CONFIG -->
+  <div class="row0">
+    <div class="row0-title">CONFIGURACION DEL SISTEMA</div>
+    <div class="row0-groups">
+      <div class="cfg-group">
+        <div class="cfg-group-label">TANQUE A CONTROLAR</div>
+        <div class="cfg-btns">
+          <button class="cfg-btn sel-purple" id="btnT1" onclick="selTank('T1')">T1</button>
+          <button class="cfg-btn" id="btnT2" onclick="selTank('T2')">T2</button>
+        </div>
+      </div>
+      <div class="sep"></div>
+      <div class="cfg-group">
+        <div class="cfg-group-label">TIPO DE CONTROLADOR</div>
+        <div class="cfg-btns">
+          <button class="cfg-btn sel-purple" id="btnCD" onclick="selCtrl('C->D')">C-&gt;D</button>
+          <button class="cfg-btn" id="btnDD" onclick="selCtrl('D->D')">D-&gt;D</button>
+        </div>
+      </div>
+      <div class="sep"></div>
+      <div class="cfg-group">
+        <div class="cfg-group-label">CANAL DE COMUNICACION</div>
+        <div class="cfg-btns">
+          <button class="cfg-btn" id="btnBT" onclick="selCanal('BT')">BT</button>
+          <button class="cfg-btn sel-cyan" id="btnSERIAL" onclick="selCanal('SERIAL')">SERIAL</button>
+          <button class="cfg-btn" id="btnWiFi" onclick="selCanal('WiFi')">WiFi</button>
+        </div>
+      </div>
+      <div class="sep"></div>
+      <div class="cfg-group" style="flex:1">
+        <div class="cfg-group-label">BROKER MQTT</div>
+        <div class="cfg-btns" style="gap:4px;align-items:center">
+          <input id="mqttHost" style="background:var(--panel2);border:1px solid var(--border);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:9px;padding:3px 5px;width:240px" value="ec982b74a6834204972e5d23ecf18792.s1.eu.hivemq.cloud">
+          <input id="mqttUser" placeholder="usuario" style="background:var(--panel2);border:1px solid var(--border);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:9px;padding:3px 5px;width:80px">
+          <input id="mqttPass" type="password" placeholder="••••" style="background:var(--panel2);border:1px solid var(--border);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:9px;padding:3px 5px;width:70px">
+          <input id="mqttTopic" placeholder="tópico base" style="background:var(--panel2);border:1px solid var(--border);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:9px;padding:3px 5px;width:90px" value="tanques/">
+        </div>
+      </div>
+      <div class="sep"></div>
+      <div class="metrics-row">
+        <div class="metric-card"><div class="mc-label">ALTURA h1</div><div class="mc-val" id="mc-h1" style="color:var(--green)">--</div><div class="mc-unit">cm</div></div>
+        <div class="metric-card"><div class="mc-label">ALTURA h2</div><div class="mc-val" id="mc-h2" style="color:var(--cyan)">--</div><div class="mc-unit">cm</div></div>
+        <div class="metric-card"><div class="mc-label">SETPOINT</div><div class="mc-val" id="mc-sp" style="color:var(--yellow)">--</div><div class="mc-unit">cm</div></div>
+        <div class="metric-card"><div class="mc-label">ERROR e(k)</div><div class="mc-val" id="mc-ek" style="color:var(--red)">--</div><div class="mc-unit">cm</div></div>
+        <div class="metric-card"><div class="mc-label">u(k) DUTY</div><div class="mc-val" id="mc-u" style="color:var(--orange)">--</div><div class="mc-unit">%</div></div>
+        <div class="metric-card mc-accent"><div class="mc-label">ISE</div><div class="mc-val" id="mc-ise" style="color:var(--accent2)">0.000</div><div class="mc-unit"></div></div>
+      </div>
+    </div>
+    <div class="status-bar">
+      <span class="status-badge sb-red" id="sb-serial">◉ SERIAL INACTIVO</span>
+      <span class="status-badge sb-orange" id="sb-mqtt">◉ MQTT DESCONECTADO</span>
+      <span class="status-badge sb-green" id="sb-tank">CTRL: T1</span>
+      <span class="status-badge sb-cyan" id="sb-chan">CANAL: SERIAL</span>
+      <span class="status-badge sb-yellow" id="sb-ts">Ts=0.050s - 20Hz | RX: 0</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════ ROW 1 -->
+  <div class="row1">
+    <div class="tanks-col">
+      <div class="tank-panel"><canvas id="tank1" class="tank-canvas"></canvas></div>
+      <div class="tank-panel"><canvas id="tank2" class="tank-canvas"></canvas></div>
+    </div>
+    <div class="plots-col">
+      <div class="plot-wrap">
+        <div class="plot-title">NIVELES Y CONTROL - TIEMPO REAL</div>
+        <div class="plot-legend">
+          <div class="leg-item"><div class="leg-dot" style="background:var(--green)"></div>h1</div>
+          <div class="leg-item"><div class="leg-dot" style="background:var(--cyan)"></div>h2</div>
+          <div class="leg-item"><div class="leg-dot" style="background:var(--yellow);opacity:.7"></div>SP</div>
+          <div class="leg-item"><div class="leg-dot" style="background:var(--orange);opacity:.7"></div>u(%)</div>
+        </div>
+        <canvas id="chartNiv" style="width:100%;height:calc(100% - 4px)"></canvas>
+      </div>
+      <div class="plot-wrap">
+        <div class="plot-title">ERROR e(k)</div>
+        <div class="plot-legend">
+          <div class="leg-item"><div class="leg-dot" style="background:var(--red)"></div>e(k)</div>
+          <div class="leg-item"><div class="leg-dot" style="background:var(--accent2)"></div>ISE</div>
+        </div>
+        <canvas id="chartErr" style="width:100%;height:calc(100% - 4px)"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════ ROW 2 -->
+  <div class="row2">
+    <!-- PID Panel -->
+    <div class="pid-panel">
+      <div class="panel-title">CONTROL — <span id="pid-mode-lbl">C→D</span></div>
+      <div class="sp-row">
+        <label>SETPOINT - h0 (cm)</label>
+        <input type="range" id="slSP" min="0" max="6" step="0.1" value="2.3">
+        <span class="sp-val" id="spVal">2.3</span>
+      </div>
+      <div class="btns-row">
+        <button class="act-btn btn-green" onclick="doConnect()">CONECTAR</button>
+        <button class="act-btn btn-cyan" onclick="doStart()">&gt;&gt; START</button>
+        <button class="act-btn btn-red" onclick="doStop()">DETENER</button>
+      </div>
+      <div class="btns-row">
+        <button class="act-btn btn-orange" onclick="doReset()">RESET</button>
+        <button class="act-btn btn-yellow" onclick="doCSV()">CSV</button>
+        <button class="act-btn btn-cyan" style="font-size:8px" onclick="doSendSP()">ENVIAR SP</button>
+      </div>
+      <div class="mqtt-fields">
+        <div class="mf"><label>Kp</label><input id="kpIn" value="80.0" onchange="sendParam('kp',this.value)"></div>
+        <div class="mf"><label>Ti</label><input id="tiIn" value="0.80" onchange="sendParam('ti',this.value)"></div>
+        <div class="mf"><label>Td</label><input id="tdIn" value="0.050" onchange="sendParam('td',this.value)"></div>
+        <div class="mf"><label>Ts</label><input id="tsIn" value="0.050" onchange="sendParam('ts',this.value)"></div>
+      </div>
+    </div>
+    <!-- Console Panel -->
+    <div class="con-panel">
+      <div class="panel-title">CONSOLA — <span id="con-chan-lbl">MQTT - broker.hivemq.com</span></div>
+      <div class="console-box" id="consoleBox"></div>
+      <div class="cmd-row">
+        <input class="cmd-input" id="cmdInput" value="sp 3.5 / start" onkeydown="if(event.key==='Enter')doSendCmd()">
+        <button class="cmd-send" onclick="doSendCmd()">SEND</button>
+      </div>
+      <div class="quick-btns">
+        <button class="qbtn" onclick="quickCmd('sp 1.5')">sp 1.5</button>
+        <button class="qbtn" onclick="quickCmd('sp 3.0')">sp 3.0</button>
+        <button class="qbtn" onclick="quickCmd('sp 4.5')">sp 4.5</button>
+        <button class="qbtn" onclick="quickCmd('sp 6.0')">sp 6.0</button>
+        <button class="qbtn" style="color:var(--cyan);border-color:var(--cyan)" onclick="quickCmd('start')">start</button>
+        <button class="qbtn" style="color:var(--red);border-color:var(--red)" onclick="quickCmd('stop')">stop</button>
+        <button class="qbtn" style="color:var(--orange);border-color:var(--orange)" onclick="quickCmd('reset')">reset</button>
+        <button class="qbtn" onclick="quickCmd('info')">info</button>
+      </div>
+      <div class="ise-row">
+        <div class="ise-box"><span class="ise-label">ISE ACUMULADO</span><span class="ise-val" id="iseVal">0.000</span></div>
+        <div class="rx-box" id="rxBox">RX: 0 pkt</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── STATE ──────────────────────────────────────────────────────────────────
+const S={
+  tanque:'T1',ctrl:'C->D',canal:'SERIAL',
+  h1:0,h2:0,sp:2.3,ek:0,u:0,
+  distRaw:0,distFilt:0,d2Raw:0,d2Filt:0,
+  ovfS1:0,rxCount:0,iseAcum:0,ts:0.05,
+  running:false,mqttOk:false,
+  tHist:[],h1Hist:[],h2Hist:[],spHist:[],uHist:[],ekHist:[],iseHist:[],
+  N:600,tStart:0,wavePhase:0,
+  console:[],csvRows:[],csvActive:false,
+  client:null
+};
+
+// ── MQTT ──────────────────────────────────────────────────────────────────
+function doConnect(){
+  const url   = document.getElementById('mqttHost').value.trim();
+  const user  = document.getElementById('mqttUser').value.trim();
+  const pass  = document.getElementById('mqttPass').value.trim();
+  const opts  = {clientId:'umng_lab5_'+Math.random().toString(16).slice(2,8),
+                 reconnectPeriod:4000, connectTimeout:8000};
+  if(user) opts.username=user;
+  if(pass) opts.password=pass;
+  addLog('[SER] Conectando a '+url+'...');
+  try{
+    if(S.client){S.client.end(true);}
+    S.client = mqtt.connect(url, opts);
+    S.client.on('connect',()=>{
+      S.mqttOk=true; S.running=true; S.tStart=performance.now()/1000;
+      const base = document.getElementById('mqttTopic').value.replace(/\/$/,'');
+      S.client.subscribe(base+'/#');
+      addLog('[MQTT] Conectado. Suscrito a '+base+'/#');
+      setSB('sb-mqtt','◉ MQTT CONECTADO','sb-green');
+      setSB('sb-serial','◉ MQTT ACTIVO','sb-green');
+    });
+    S.client.on('message',(topic,payload)=>onMsg(topic,payload.toString()));
+    S.client.on('error',e=>{addLog('[MQTT] Error: '+e.message);setSB('sb-mqtt','◉ MQTT ERROR','sb-red');});
+    S.client.on('close',()=>{S.mqttOk=false;setSB('sb-mqtt','◉ MQTT DESCONECTADO','sb-orange');});
+  }catch(e){addLog('[ERR] '+e.message);}
+}
+
+function mqttPub(subtopic, msg){
+  if(!S.mqttOk||!S.client) return;
+  const base = document.getElementById('mqttTopic').value.replace(/\/$/,'');
+  S.client.publish(base+'/'+subtopic, String(msg));
+}
+
+function doStart(){mqttPub('cmd','start');addLog('[CMD] >> start');}
+function doStop(){
+  if(S.client){S.client.end(true);S.client=null;}
+  S.mqttOk=false;S.running=false;
+  setSB('sb-mqtt','◉ MQTT DESCONECTADO','sb-orange');
+  setSB('sb-serial','◉ SERIAL INACTIVO','sb-red');
+  addLog('[SYS] Desconectado');
+}
+function doReset(){
+  doStop();
+  Object.assign(S,{h1:0,h2:0,u:0,ek:0,iseAcum:0,distRaw:0,distFilt:0,d2Raw:0,d2Filt:0,ovfS1:0,rxCount:0});
+  S.tHist=[];S.h1Hist=[];S.h2Hist=[];S.spHist=[];S.uHist=[];S.ekHist=[];S.iseHist=[];
+  addLog('[SYS] Sistema reseteado');
+}
+function doSendSP(){
+  mqttPub('pid/setpoint', S.sp.toFixed(2));
+  addLog(`[CMD] SP -> ${S.sp.toFixed(2)} cm`);
+}
+function sendParam(k,v){mqttPub('pid/'+k,parseFloat(v).toFixed(4));addLog(`[CMD] ${k}=${v}`);}
+
+// ── MSG PARSER ────────────────────────────────────────────────────────────
+// Protocolo ESP32: [S2]DistRaw:7.36,DistFilt:7.37,D2Raw:6.76,D2Filt:6.76,
+//   Nivel:2.71,SP:2.30,Error:-0.41,Duty:100.0,Altura1:2.10,Altura2:2.71,OVF_S1=0
+function parseESP32(line){
+  let clean=line.trim();
+  if(clean.startsWith('[')){ const i=clean.indexOf(']'); if(i>=0) clean=clean.slice(i+1);}
+  clean=clean.replace(/=/g,':');
+  const parts={};
+  clean.split(',').forEach(t=>{
+    t=t.trim(); if(!t.includes(':')) return;
+    const [k,v]=t.split(':',2);
+    const n=parseFloat(v);
+    if(!isNaN(n)) parts[k.trim()]=n;
+  });
+  if(Object.keys(parts).length<2) return false;
+  if('DistRaw'  in parts) S.distRaw  = +parts.DistRaw.toFixed(3);
+  if('DistFilt' in parts) S.distFilt = +parts.DistFilt.toFixed(3);
+  if('D2Raw'    in parts) S.d2Raw    = +parts.D2Raw.toFixed(3);
+  if('D2Filt'   in parts) S.d2Filt   = +parts.D2Filt.toFixed(3);
+  const fb = 'Nivel' in parts ? +parts.Nivel.toFixed(3) : null;
+  S.h1 = 'Altura1' in parts ? +parts.Altura1.toFixed(3) : (fb!==null?fb:S.h1);
+  S.h2 = 'Altura2' in parts ? +parts.Altura2.toFixed(3) : (fb!==null?fb:S.h2);
+  if('SP'    in parts) S.sp = +parts.SP.toFixed(2);
+  if('Error' in parts) S.ek = +parts.Error.toFixed(4);
+  if('Duty'  in parts) S.u  = +parts.Duty.toFixed(2);
+  if('OVF_S1'in parts) S.ovfS1 = Math.round(parts.OVF_S1);
+  return true;
+}
+
+function onMsg(topic,payload){
+  const base = document.getElementById('mqttTopic').value.replace(/\/$/,'');
+  // full state line on tanques/estado or tanques/sensor/estado
+  if(topic.endsWith('/estado')||topic.endsWith('/raw')||topic===base){
+    if(parseESP32(payload)){
+      S.rxCount++;
+      recordSample();
+    }
+  } else {
+    // individual subtopics
+    const sub = topic.replace(base+'/','');
+    const v   = parseFloat(payload);
+    if(!isNaN(v)){
+      if(sub==='sensor/nivel1') { S.h1=+v.toFixed(3); recordSample(); S.rxCount++; }
+      if(sub==='sensor/nivel2') { S.h2=+v.toFixed(3); }
+      if(sub==='pid/output')    { S.u =+v.toFixed(2); }
+      if(sub==='pid/error')     { S.ek=+v.toFixed(4); }
+    }
+  }
+}
+
+function recordSample(){
+  const now = performance.now()/1000 - S.tStart;
+  push(S.tHist, now);
+  push(S.h1Hist, S.h1);
+  push(S.h2Hist, S.h2);
+  push(S.spHist, S.sp);
+  push(S.uHist,  S.u);
+  push(S.ekHist, S.ek);
+  S.iseAcum = +(S.iseAcum + S.ek*S.ek*S.ts).toFixed(4);
+  push(S.iseHist, S.iseAcum);
+  if(S.csvActive){
+    S.csvRows.push([now.toFixed(4),S.h1,S.h2,S.distRaw,S.distFilt,S.d2Raw,S.d2Filt,
+      S.sp,S.ek,S.u,S.iseAcum,S.ts,S.ovfS1].join(','));
+  }
+}
+function push(arr,v){arr.push(v);if(arr.length>S.N)arr.shift();}
+
+// ── CSV ───────────────────────────────────────────────────────────────────
+function doCSV(){
+  if(!S.csvActive){
+    S.csvActive=true;S.csvRows=[
+      't(s),h1_Altura1,h2_Altura2,DistRaw,DistFilt,D2Raw,D2Filt,SP,e(k),u(%),ISE,Ts,OVF_S1'];
+    addLog('[CSV] Grabando...');
+  } else {
+    S.csvActive=false;
+    const blob=new Blob([S.csvRows.join('\n')],{type:'text/csv'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`tanques_${new Date().toISOString().replace(/[:.]/g,'-')}.csv`;
+    a.click();
+    addLog('[CSV] Archivo descargado');
+    S.csvRows=[];
+  }
+}
+
+// ── CONFIG BUTTONS ────────────────────────────────────────────────────────
+function selTank(t){
+  S.tanque=t;
+  ['T1','T2'].forEach(id=>document.getElementById('btn'+id).className='cfg-btn'+(id===t?' sel-purple':''));
+  document.getElementById('sb-tank').textContent='CTRL: '+t;
+  mqttPub('cmd', t.toLowerCase());
+  addLog('[CFG] Tanque: '+t);
+}
+function selCtrl(c){
+  S.ctrl=c;
+  ['CD','DD'].forEach((id,i)=>document.getElementById('btn'+id).className='cfg-btn'+(['C->D','D->D'][i]===c?' sel-purple':''));
+  document.getElementById('pid-mode-lbl').textContent=c;
+}
+function selCanal(c){
+  S.canal=c;
+  ['BT','SERIAL','WiFi'].forEach(id=>{
+    const btn=document.getElementById('btn'+id);
+    btn.className='cfg-btn'+(id===c?(c==='SERIAL'?' sel-cyan':' sel-purple'):'');
+  });
+  document.getElementById('sb-chan').textContent='CANAL: '+c;
+  addLog('[COM] Canal: '+c);
+}
+function setSB(id,txt,cls){
+  const el=document.getElementById(id);
+  el.textContent=txt;
+  el.className='status-badge '+cls;
+}
+
+// ── SLIDER SP ─────────────────────────────────────────────────────────────
+document.getElementById('slSP').addEventListener('input',function(){
+  S.sp=parseFloat(this.value);
+  document.getElementById('spVal').textContent=S.sp.toFixed(1);
+  mqttPub('pid/setpoint',S.sp.toFixed(2));
+  addLog(`[CMD] SP -> ${S.sp.toFixed(1)} cm`);
+});
+
+// ── CONSOLE ───────────────────────────────────────────────────────────────
+function addLog(msg){
+  const ts=new Date().toTimeString().slice(0,8);
+  S.console.push(`[${ts}] ${msg}`);
+  if(S.console.length>80) S.console.shift();
+  const box=document.getElementById('consoleBox');
+  box.innerHTML=S.console.slice(-20).map(l=>`<div>${l}</div>`).join('');
+  box.scrollTop=box.scrollHeight;
+}
+function doSendCmd(){
+  const cmd=document.getElementById('cmdInput').value.trim();
+  if(!cmd) return;
+  addLog('[CMD] >> '+cmd);
+  parseCmd(cmd);
+}
+function quickCmd(c){
+  document.getElementById('cmdInput').value=c;
+  addLog('[CMD] '+c);
+  parseCmd(c);
+}
+function parseCmd(cmd){
+  cmd.replace(/\//g,' ').trim().split(/\s+/).forEach((t,i,arr)=>{
+    if(t.toLowerCase()==='start'){mqttPub('cmd','start');return;}
+    if(t.toLowerCase()==='stop'){doStop();return;}
+    if(t.toLowerCase()==='reset'){doReset();return;}
+    if(t.toLowerCase()==='sp'&&arr[i+1]){
+      const v=parseFloat(arr[i+1]);
+      if(!isNaN(v)){S.sp=v;document.getElementById('slSP').value=v;
+        document.getElementById('spVal').textContent=v.toFixed(1);
+        mqttPub('pid/setpoint',v.toFixed(2));
+      }
+    }
+  });
+}
+
+// ── CHARTS ────────────────────────────────────────────────────────────────
+const COPT={responsive:true,maintainAspectRatio:false,animation:false,
+  plugins:{legend:{display:false}},
+  scales:{x:{ticks:{color:'#8b949e',font:{family:'JetBrains Mono',size:8},maxTicksLimit:8,maxRotation:0},
+               grid:{color:'rgba(48,54,61,.5)'},border:{color:'#30363d'}},
+          y:{ticks:{color:'#8b949e',font:{family:'JetBrains Mono',size:8}},
+             grid:{color:'rgba(48,54,61,.5)'},border:{color:'#30363d'}}}};
+
+const ctxNiv=document.getElementById('chartNiv').getContext('2d');
+const ctxErr=document.getElementById('chartErr').getContext('2d');
+
+const chartNiv=new Chart(ctxNiv,{type:'line',data:{labels:[],datasets:[
+  {label:'h1', data:[], borderColor:'#3fb950', borderWidth:1.5, tension:.4, pointRadius:0, fill:false},
+  {label:'h2', data:[], borderColor:'#58a6ff', borderWidth:1.5, tension:.4, pointRadius:0, fill:false},
+  {label:'SP', data:[], borderColor:'#e3b341', borderWidth:1.2, borderDash:[4,4], tension:0, pointRadius:0, fill:false},
+  {label:'u',  data:[], borderColor:'#f0883e', borderWidth:1.0, tension:.3, pointRadius:0, fill:false, yAxisID:'y2'}
+]},options:{...JSON.parse(JSON.stringify(COPT)),
+  scales:{...JSON.parse(JSON.stringify(COPT.scales),null,2),
+    y:{...COPT.scales.y,min:-0.2,max:6.5,ticks:{...COPT.scales.y.ticks,callback:v=>v+'cm'}},
+    y2:{position:'right',min:0,max:105,ticks:{color:'#f0883e',font:{family:'JetBrains Mono',size:7},callback:v=>v+'%'},grid:{display:false},border:{color:'#30363d'}}
+  }}});
+
+const chartErr=new Chart(ctxErr,{type:'line',data:{labels:[],datasets:[
+  {label:'e(k)',data:[], borderColor:'#f85149', borderWidth:1.2, tension:.3, pointRadius:0, fill:false},
+  {label:'ISE', data:[], borderColor:'#a855f7', borderWidth:1.5, tension:.3, pointRadius:0, fill:false, yAxisID:'y2'}
+]},options:{...JSON.parse(JSON.stringify(COPT)),
+  scales:{...JSON.parse(JSON.stringify(COPT.scales)),
+    y:{...COPT.scales.y,ticks:{...COPT.scales.y.ticks,callback:v=>v.toFixed(2)}},
+    y2:{position:'right',ticks:{color:'#a855f7',font:{family:'JetBrains Mono',size:7}},grid:{display:false},border:{color:'#30363d'}}
+  }}});
+
+// ── TANK CANVAS ──────────────────────────────────────────────────────────
+const H_MAX=6.0;
+function drawTank(canvasId,hPct,spPct,wavePhase,waterColor,title,titleCol,isTank1){
+  const canvas=document.getElementById(canvasId);
+  const W=canvas.offsetWidth; const H=canvas.offsetHeight;
+  canvas.width=W; canvas.height=H;
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+
+  const TL=W*0.20,TR=W*0.80,TB=H*0.06,TT=H*0.90;
+  const tankH=TT-TB; const tankW=TR-TL;
+  const h=Math.max(0,Math.min(hPct,1));
+  const waterTop=TT-tankH*h;
+
+  // OVF border
+  ctx.strokeStyle=(isTank1&&S.ovfS1)?'#f85149':'#3d444d';
+  ctx.lineWidth=2;
+  ctx.fillStyle='#080c10';
+  ctx.beginPath(); ctx.rect(TL,TB,tankW,tankH);
+  ctx.fill(); ctx.stroke();
+
+  // Water
+  if(h>0.005){
+    // water body
+    ctx.fillStyle=waterColor+'cc';
+    ctx.fillRect(TL+1,waterTop,tankW-2,TT-waterTop-1);
+    // wave
+    const nPts=80;
+    ctx.beginPath();
+    const amp=Math.min(h,0.25)*5+2;
+    for(let i=0;i<=nPts;i++){
+      const x=TL+(tankW*i/nPts);
+      const y=waterTop+amp*Math.sin(3*Math.PI*(i/nPts)*2+wavePhase);
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.lineTo(TR,TT); ctx.lineTo(TL,TT); ctx.closePath();
+    ctx.fillStyle=waterColor+'dd'; ctx.fill();
+    // wave highlight
+    ctx.beginPath();
+    for(let i=0;i<=nPts;i++){
+      const x=TL+(tankW*i/nPts);
+      const y=waterTop+amp*Math.sin(3*Math.PI*(i/nPts)*2+wavePhase);
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=1; ctx.stroke();
+  }
+
+  // SP line
+  if(spPct>0){
+    const spY=TT-tankH*Math.min(spPct,1);
+    ctx.setLineDash([5,3]);
+    ctx.strokeStyle='#e3b341'; ctx.lineWidth=1.3;
+    ctx.beginPath(); ctx.moveTo(TL+2,spY); ctx.lineTo(TR-2,spY); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#e3b341'; ctx.font='bold 8px JetBrains Mono';
+    ctx.fillText('SP',TR+3,spY+3);
+  }
+
+  // Scale marks
+  ctx.fillStyle='#8b949e'; ctx.font='8px JetBrains Mono';
+  [[0.25,1.5],[0.5,3.0],[0.75,4.5]].forEach(([pct,val])=>{
+    const my=TB+tankH*(1-pct);
+    ctx.strokeStyle='#8b949e'; ctx.lineWidth=0.7;
+    ctx.beginPath(); ctx.moveTo(TL-6,my); ctx.lineTo(TL+2,my); ctx.stroke();
+    ctx.fillText(val.toFixed(1),TL-22,my+3);
+  });
+
+  // Pipes
+  ctx.fillStyle='#3d444d';
+  ctx.fillRect(TR,TB+tankH*0.05,W*0.07,H*0.035);
+  ctx.fillRect(TL+tankW/2-W*0.03,TT,W*0.06,H*0.065);
+
+  // Flow arrow tank1
+  if(isTank1&&S.u>2){
+    const ay=TB+tankH*0.07+H*0.015;
+    ctx.strokeStyle='#58a6ff'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(TR+W*0.06,ay); ctx.lineTo(TR+4,ay); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(TR+4,ay); ctx.lineTo(TR+4+7,ay-4); ctx.lineTo(TR+4+7,ay+4); ctx.closePath();
+    ctx.fillStyle='#58a6ff'; ctx.fill();
+  }
+
+  // Title
+  ctx.fillStyle=titleCol; ctx.font='bold 9px JetBrains Mono'; ctx.textAlign='center';
+  ctx.fillText(title,W/2,H*0.04+1);
+
+  // Labels
+  ctx.font='bold 8px JetBrains Mono'; ctx.textAlign='left';
+  if(isTank1){
+    ctx.fillStyle='#3fb950'; ctx.fillText(`ALT1`,3,H*0.35); ctx.fillText(`${S.h1.toFixed(2)}cm`,3,H*0.44);
+    ctx.fillStyle='#f0883e'; ctx.fillText(`DUTY`,3,H*0.60); ctx.fillText(`${S.u.toFixed(0)}%`,3,H*0.68);
+    ctx.textAlign='right';
+    ctx.fillStyle='#f85149'; ctx.fillText(`ERR`,W-3,H*0.60); ctx.fillText(S.ek.toFixed(2),W-3,H*0.68);
+    if(S.ovfS1){
+      ctx.fillStyle='#f85149'; ctx.font='bold 13px JetBrains Mono'; ctx.textAlign='center';
+      ctx.fillText('OVF!',W/2,H*0.50);
+    }
+  } else {
+    ctx.fillStyle='#58a6ff'; ctx.fillText(`ALT2`,3,H*0.35); ctx.fillText(`${S.h2.toFixed(2)}cm`,3,H*0.44);
+    ctx.fillStyle='#58a6ff'; ctx.fillText(`dRaw`,3,H*0.60); ctx.fillText(S.d2Raw.toFixed(2),3,H*0.68);
+    ctx.textAlign='right';
+    ctx.fillStyle='#a855f7'; ctx.fillText(`dFlt`,W-3,H*0.60); ctx.fillText(S.d2Filt.toFixed(2),W-3,H*0.68);
+  }
+  ctx.textAlign='center'; ctx.fillStyle='#8b949e'; ctx.font='7.5px JetBrains Mono';
+  ctx.fillText('acoplamiento hidraulico',W/2,H*0.98);
+}
+
+// ── ANIMATION LOOP ────────────────────────────────────────────────────────
+function updateCharts(){
+  if(S.tHist.length<2) return;
+  const WIN=60;
+  const t=S.tHist;
+  const tLast=t[t.length-1];
+  const tMin=Math.max(0,tLast-WIN);
+  // filter window
+  const labels=t.filter(v=>v>=tMin).map(v=>v.toFixed(1));
+  const idx=t.findIndex(v=>v>=tMin);
+
+  function sl(arr){return arr.slice(idx);}
+  chartNiv.data.labels=labels;
+  chartNiv.data.datasets[0].data=sl(S.h1Hist);
+  chartNiv.data.datasets[1].data=sl(S.h2Hist);
+  chartNiv.data.datasets[2].data=sl(S.spHist);
+  chartNiv.data.datasets[3].data=sl(S.uHist);
+  chartNiv.update('none');
+
+  chartErr.data.labels=labels;
+  chartErr.data.datasets[0].data=sl(S.ekHist);
+  chartErr.data.datasets[1].data=sl(S.iseHist);
+  const erMax=Math.max(3,Math.max(...sl(S.ekHist).map(Math.abs))*1.3);
+  chartErr.options.scales.y.min=-erMax; chartErr.options.scales.y.max=erMax;
+  chartErr.update('none');
+}
+
+function updateUI(){
+  S.wavePhase+=0.18;
+  drawTank('tank1',S.h1/H_MAX,S.sp/H_MAX,S.wavePhase,'#0e4f6b','TANQUE 1 - ENTRADA','#3fb950',true);
+  drawTank('tank2',S.h2/H_MAX,S.sp/H_MAX,S.wavePhase+1.2,'#0e3b5e','TANQUE 2 - SALIDA','#58a6ff',false);
+
+  const fmt=(v,d=2)=>isNaN(v)?'--':v.toFixed(d);
+  document.getElementById('mc-h1').textContent=fmt(S.h1);
+  document.getElementById('mc-h2').textContent=fmt(S.h2);
+  document.getElementById('mc-sp').textContent=fmt(S.sp,1);
+  document.getElementById('mc-ek').textContent=fmt(S.ek);
+  document.getElementById('mc-u').textContent=fmt(S.u);
+  document.getElementById('mc-ise').textContent=fmt(S.iseAcum,3);
+  document.getElementById('iseVal').textContent=fmt(S.iseAcum,3);
+  document.getElementById('rxBox').textContent='RX: '+S.rxCount+' pkt';
+  document.getElementById('sb-ts').textContent=
+    `Ts=${S.ts.toFixed(3)}s - ${Math.round(1/S.ts)}Hz | RX: ${S.rxCount}`;
+
+  updateCharts();
+}
+
+setInterval(updateUI,150);
+
+// ── INIT LOGS ────────────────────────────────────────────────────────────
+addLog('[SYS] UMNG Lab 5 - Tanques Acoplados v5 (Web/MQTT)');
+addLog('[SER] Configura el broker MQTT arriba y presiona CONECTAR');
+addLog('[CFG] Tanque:T1 | Modo:C->D | Canal:SERIAL');
+addLog('[PRO] Protocolo: [S2]...Altura1:x,Altura2:y,OVF_S1=z');
+addLog('[SYS] Tópico MQTT de estado: tanques/estado');
+addLog('[SYS] Presiona CONECTAR luego >> START');
+</script>
+</body>
+</html>
