@@ -395,7 +395,7 @@ function selCtrl(c){
   ['CD','DD'].forEach((id,i)=>document.getElementById('btn'+id).className='cfg-btn'+(['C->D','D->D'][i]===c?' sel-purple':''));
   document.getElementById('pid-mode-lbl').textContent=c;
   // Publish controller type: 'c' for C->D, 'd' for D->D
-  const code = (c === 'C->D') ? 'c' : 'd';
+  const code = (c === 'C->D') ? 'c' : 'c';
   mqttPub('cmd', code);
   addLog(`[CFG] Controlador: ${c} → cmd="${code}"`);
 }
