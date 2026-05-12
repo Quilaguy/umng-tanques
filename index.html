@@ -82,13 +82,6 @@
   .btn-orange{border-color:var(--orange);color:var(--orange)}
   .btn-yellow{border-color:var(--yellow);color:var(--yellow)}
 
-  /* MQTT config */
-  .mqtt-fields{display:grid;grid-template-columns:1fr 1fr;gap:4px}
-  .mf{display:flex;flex-direction:column;gap:2px}
-  .mf label{color:var(--textdim);font-size:8px}
-  .mf input{background:var(--panel2);border:1px solid var(--border);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:9px;padding:3px 5px}
-  .mf input:focus{outline:none;border-color:var(--cyan)}
-
   /* Console */
   .console-box{background:#0a0f14;border:1px solid var(--cyan);padding:5px 7px;flex:1;overflow-y:auto;min-height:0;font-size:9px;line-height:1.6;color:var(--green)}
   .cmd-row{display:flex;gap:4px;align-items:stretch}
@@ -214,12 +207,6 @@
         <button class="act-btn btn-yellow" onclick="doCSV()">CSV</button>
         <button class="act-btn btn-cyan" style="font-size:8px" onclick="doSendSP()">ENVIAR SP</button>
       </div>
-      <div class="mqtt-fields">
-        <div class="mf"><label>Kp</label><input id="kpIn" value="80.0" onchange="sendParam('kp',this.value)"></div>
-        <div class="mf"><label>Ti</label><input id="tiIn" value="0.80" onchange="sendParam('ti',this.value)"></div>
-        <div class="mf"><label>Td</label><input id="tdIn" value="0.050" onchange="sendParam('td',this.value)"></div>
-        <div class="mf"><label>Ts</label><input id="tsIn" value="0.050" onchange="sendParam('ts',this.value)"></div>
-      </div>
     </div>
     <!-- Console Panel -->
     <div class="con-panel">
@@ -312,11 +299,8 @@ function doSendSP(){
   mqttPub('pid/setpoint', S.sp.toFixed(2));
   addLog(`[CMD] SP -> ${S.sp.toFixed(2)} cm`);
 }
-function sendParam(k,v){mqttPub('pid/'+k,parseFloat(v).toFixed(4));addLog(`[CMD] ${k}=${v}`);}
 
 // ── MSG PARSER ────────────────────────────────────────────────────────────
-// Protocolo ESP32: [S2]DistRaw:7.36,DistFilt:7.37,D2Raw:6.76,D2Filt:6.76,
-//   Nivel:2.71,SP:2.30,Error:-0.41,Duty:100.0,Altura1:2.10,Altura2:2.71,OVF_S1=0
 function parseESP32(line){
   let clean=line.trim();
   if(clean.startsWith('[')){ const i=clean.indexOf(']'); if(i>=0) clean=clean.slice(i+1);}
@@ -345,14 +329,12 @@ function parseESP32(line){
 
 function onMsg(topic,payload){
   const base = document.getElementById('mqttTopic').value.replace(/\/$/,'');
-  // full state line on tanques/estado or tanques/sensor/estado
   if(topic.endsWith('/estado')||topic.endsWith('/raw')||topic===base){
     if(parseESP32(payload)){
       S.rxCount++;
       recordSample();
     }
   } else {
-    // individual subtopics
     const sub = topic.replace(base+'/','');
     const v   = parseFloat(payload);
     if(!isNaN(v)){
@@ -407,11 +389,17 @@ function selTank(t){
   mqttPub('cmd', t.toLowerCase());
   addLog('[CFG] Tanque: '+t);
 }
+
 function selCtrl(c){
   S.ctrl=c;
   ['CD','DD'].forEach((id,i)=>document.getElementById('btn'+id).className='cfg-btn'+(['C->D','D->D'][i]===c?' sel-purple':''));
   document.getElementById('pid-mode-lbl').textContent=c;
+  // Publish controller type: 'c' for C->D, 'd' for D->D
+  const code = (c === 'C->D') ? 'c' : 'd';
+  mqttPub('cmd', code);
+  addLog(`[CFG] Controlador: ${c} → cmd="${code}"`);
 }
+
 function selCanal(c){
   S.canal=c;
   ['BT','SERIAL','WiFi'].forEach(id=>{
@@ -515,19 +503,15 @@ function drawTank(canvasId,hPct,spPct,wavePhase,waterColor,title,titleCol,isTank
   const h=Math.max(0,Math.min(hPct,1));
   const waterTop=TT-tankH*h;
 
-  // OVF border
   ctx.strokeStyle=(isTank1&&S.ovfS1)?'#f85149':'#3d444d';
   ctx.lineWidth=2;
   ctx.fillStyle='#080c10';
   ctx.beginPath(); ctx.rect(TL,TB,tankW,tankH);
   ctx.fill(); ctx.stroke();
 
-  // Water
   if(h>0.005){
-    // water body
     ctx.fillStyle=waterColor+'cc';
     ctx.fillRect(TL+1,waterTop,tankW-2,TT-waterTop-1);
-    // wave
     const nPts=80;
     ctx.beginPath();
     const amp=Math.min(h,0.25)*5+2;
@@ -538,7 +522,6 @@ function drawTank(canvasId,hPct,spPct,wavePhase,waterColor,title,titleCol,isTank
     }
     ctx.lineTo(TR,TT); ctx.lineTo(TL,TT); ctx.closePath();
     ctx.fillStyle=waterColor+'dd'; ctx.fill();
-    // wave highlight
     ctx.beginPath();
     for(let i=0;i<=nPts;i++){
       const x=TL+(tankW*i/nPts);
@@ -548,7 +531,6 @@ function drawTank(canvasId,hPct,spPct,wavePhase,waterColor,title,titleCol,isTank
     ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=1; ctx.stroke();
   }
 
-  // SP line
   if(spPct>0){
     const spY=TT-tankH*Math.min(spPct,1);
     ctx.setLineDash([5,3]);
@@ -559,7 +541,6 @@ function drawTank(canvasId,hPct,spPct,wavePhase,waterColor,title,titleCol,isTank
     ctx.fillText('SP',TR+3,spY+3);
   }
 
-  // Scale marks
   ctx.fillStyle='#8b949e'; ctx.font='8px JetBrains Mono';
   [[0.25,1.5],[0.5,3.0],[0.75,4.5]].forEach(([pct,val])=>{
     const my=TB+tankH*(1-pct);
@@ -568,12 +549,10 @@ function drawTank(canvasId,hPct,spPct,wavePhase,waterColor,title,titleCol,isTank
     ctx.fillText(val.toFixed(1),TL-22,my+3);
   });
 
-  // Pipes
   ctx.fillStyle='#3d444d';
   ctx.fillRect(TR,TB+tankH*0.05,W*0.07,H*0.035);
   ctx.fillRect(TL+tankW/2-W*0.03,TT,W*0.06,H*0.065);
 
-  // Flow arrow tank1
   if(isTank1&&S.u>2){
     const ay=TB+tankH*0.07+H*0.015;
     ctx.strokeStyle='#58a6ff'; ctx.lineWidth=1.5;
@@ -583,11 +562,9 @@ function drawTank(canvasId,hPct,spPct,wavePhase,waterColor,title,titleCol,isTank
     ctx.fillStyle='#58a6ff'; ctx.fill();
   }
 
-  // Title
   ctx.fillStyle=titleCol; ctx.font='bold 9px JetBrains Mono'; ctx.textAlign='center';
   ctx.fillText(title,W/2,H*0.04+1);
 
-  // Labels
   ctx.font='bold 8px JetBrains Mono'; ctx.textAlign='left';
   if(isTank1){
     ctx.fillStyle='#3fb950'; ctx.fillText(`ALT1`,3,H*0.35); ctx.fillText(`${S.h1.toFixed(2)}cm`,3,H*0.44);
@@ -615,7 +592,6 @@ function updateCharts(){
   const t=S.tHist;
   const tLast=t[t.length-1];
   const tMin=Math.max(0,tLast-WIN);
-  // filter window
   const labels=t.filter(v=>v>=tMin).map(v=>v.toFixed(1));
   const idx=t.findIndex(v=>v>=tMin);
 
